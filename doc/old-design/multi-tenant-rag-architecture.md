@@ -382,7 +382,7 @@ async def search_knowledge_base(
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  用户聊天流程                                                │
-├─────────────────────────────────────────────────────────────┤
+├─────────────��───────────────────────────────────────────────┤
 │                                                              │
 │  1. 前端发送聊天请求                                          │
 │     POST /api/v1/chat/agent/stream                           │
@@ -761,32 +761,56 @@ CREATE INDEX idx_chunks_document ON document_chunks(document_id, chunk_index);
 
 ### Universal Agent Backend（REST API + Agent 编排）
 
-1. **`app/models/database.py`** (修改)
-   - 添加 KnowledgeBase、Document、DocumentChunk 模型
-   - 在 User 模型中添加 relationship
+**文件组织（采用模块化分组结构）**：
 
-2. **`app/core/crud/knowledge_base.py`** (新建)
-   - 实现 KnowledgeBaseCRUD、DocumentCRUD 类
-   - 所有方法都带 user_id 验证
+#### API 层 - `app/api/v1/knowledge/`（新建子模块）
+```
+app/api/v1/knowledge/
+├── __init__.py
+├── router.py          # 路由聚合，注册到主 router
+├── bases.py           # 知识库管理端点
+└── documents.py       # 文档管理端点
+```
 
-3. **`app/api/v1/knowledge_bases.py`** (新建)
-   - POST /api/v1/knowledge-bases - 创建知识库
-   - GET /api/v1/knowledge-bases - 列出知识库
-   - GET /api/v1/knowledge-bases/{id} - 获取知识库
-   - DELETE /api/v1/knowledge-bases/{id} - 删除知识库
+#### CRUD 层 - `app/core/crud/knowledge/`（新建子模块）
+```
+app/core/crud/knowledge/
+├── __init__.py
+├── base.py            # KnowledgeBase CRUD
+├── document.py        # Document CRUD
+└── chunk.py           # DocumentChunk CRUD
+```
 
-4. **`app/api/v1/documents.py`** (新建)
-   - POST /api/v1/documents/upload - 上传文档
-   - GET /api/v1/documents - 列出文档
-   - GET /api/v1/documents/{id}/status - 查询状态
-   - DELETE /api/v1/documents/{id} - 删除文档
+#### 文档处理层 - `app/core/document/`（新建模块）
+```
+app/core/document/
+├── __init__.py
+├── processor.py       # 文档处理服务（分块、嵌入、向量化）
+└── vector_store.py   # 向量数据库客户端（Pinecone/Weaviate）
+```
 
-5. **`app/graphs/agent.py`** (修改)
-   - 修改 `call_tool_node` 注入 user_id 到 search_knowledge_base
+#### 模型层 - `app/models/database.py`（修改）
+- 添加 KnowledgeBase、Document、DocumentChunk 模型
 
-6. **`app/services/document_processor.py`** (新建)
-   - 异步文档处理服务
-   - 分块、嵌入、向量化
+#### Agent 层 - `app/graphs/agent.py`（修改）
+- 修改 `call_tool_node` 注入 user_id 到 search_knowledge_base
+
+#### Pydantic 模型 - `app/knowledge/schemas.py`（新建）
+- 知识库相关的请求/响应模型
+
+**文件说明**：
+1. **`app/api/v1/knowledge/router.py`** - 路由聚合，将知识库路由注册到主 router
+2. **`app/api/v1/knowledge/bases.py`** - 知识库 CRUD 端点（创建、列表、获取、删除）
+3. **`app/api/v1/knowledge/documents.py`** - 文档 CRUD 端点（上传、列表、状态、删除）
+4. **`app/core/crud/knowledge/base.py`** - KnowledgeBaseCRUD 类
+5. **`app/core/crud/knowledge/document.py`** - DocumentCRUD 类
+6. **`app/core/crud/knowledge/chunk.py`** - DocumentChunkCRUD 类
+7. **`app/core/document/processor.py`** - 异步文档处理服务
+8. **`app/core/document/vector_store.py`** - 向量数据库客户端
+9. **`app/knowledge/schemas.py`** - Pydantic 请求/响应模型
+10. **`app/models/database.py`** - 添加知识库相关 ORM 模型
+11. **`app/graphs/agent.py`**** - 修改 Agent 工具调用，注入 user_id
+12. **`app/api/v1/router.py`** - 修改：注册 knowledge 路由
 
 ### RAG-MCP-Server（仅搜索能力）
 

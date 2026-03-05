@@ -1,18 +1,22 @@
 # RAG MCP Server
 
-> 一个基于 Model Context Protocol (MCP) 的独立 RAG 服务，提供文档知识库和语义检索能力
+> 一个基于 Model Context Protocol (MCP) 的语义搜索服务，为多租户 RAG 系统提供向量检索能力
 
 ## 简介
 
-RAG MCP Server 是一个标准化的 MCP 服务器，将 RAG（检索增强生成）能力封装成可复用的工具。任何支持 MCP 协议的 Agent 应用都可以通过标准接口集成文档知识库功能。
+RAG MCP Server 是一个专注于语义搜索的 MCP 服务器，为 Universal Agent Backend 提供高效的向量检索能力。它通过 MCP 协议将搜索能力暴露给 Agent，实现智能的文档知识库查询。
+
+**架构说明：**
+- **文档管理**（上传、列表、删除）由 Universal Agent Backend 的 REST API 提供
+- **语义搜索**由 RAG-MCP-Server 的 MCP 工具提供
+- 所有操作严格按 `user_id` 隔离，确保多租户数据安全
 
 ## 核心特性
 
-- **智能检索** - 语义向量搜索（pgvector + OpenAI embeddings）
-- **文档管理** - 支持 PDF、TXT、Markdown、DOCX
-- **MCP 协议** - 即插即用的标准化接口
-- **用户隔离** - 多用户数据隔离和权限控制
-- **高性能** - 批量处理、向量索引优化
+- **语义搜索** - 基于向量的语义检索（Pinecone/Weaviate）
+- **用户隔离** - 向量数据库层面的元数据过滤
+- **MCP 协议** - 标准化工具接口
+- **高性能** - 向量索引优化、批量查询支持
 
 ## 快速开始
 
@@ -30,37 +34,30 @@ pip install -r requirements.txt
 
 ```bash
 cp .env.example .env
-# 编辑 .env 文件，配置数据库和 API 密钥
+# 编辑 .env 文件，配置向量数据库和 API 密钥
 ```
 
-### 3. 初始化数据库
-
-```bash
-# 启动 PostgreSQL（如果还未启动）
-docker-compose up -d
-
-# 运行迁移
-uv run python -m scripts.init_db
-```
-
-### 4. 启动服务
+### 3. 启动服务
 
 ```bash
 uv run python -m src.main
 ```
 
-服务将在 `http://localhost:8000` 启动。
+服务将以 MCP stdio 模式启动，等待 Agent 连接调用。
 
 ## MCP 工具列表
 
 | 工具名称 | 描述 |
 |---------|------|
-| `upload_document` | 上传并处理文档（自动分块、向量化） |
-| `search_knowledge_base` | 语义搜索知识库 |
-| `list_documents` | 列出用户的所有文档 |
-| `delete_document` | 删除文档及其向量数据 |
-| `create_collection` | 创建文档集合 |
-| `add_to_collection` | 将文档添加到集合 |
+| `search_knowledge_base` | 在用户的知识库中进行语义搜索（带用户隔离） |
+
+**工具参数：**
+- `user_id` (必需) - 用户 ID，用于数据隔离
+- `knowledge_base_id` (必需) - 知识库 ID
+- `query` (必需) - 搜索查询
+- `top_k` (可选) - 返回结果数量，默认 5
+
+**注意：** 文档上传、列表、删除等操作请使用 Universal Agent Backend 的 REST API 端点。
 
 ## 使用示例
 
@@ -74,33 +71,59 @@ MCP_SERVERS = {
         "command": "uv",
         "args": ["--directory", "/path/to/RAG-MCP-Server", "run", "python", "-m", "src.main"],
         "env": {
-            "DATABASE_URL": "postgresql+asyncpg://...",
-            "OPENAI_API_KEY": "sk-..."
+            "PINECONE_API_KEY": "your-pinecone-key",
+            "ZHIPUAI_API_KEY": "your-zhipuai-key"
         }
     }
 }
 ```
 
-### Agent 调用示例
+### 端到端工作流程
 
-```python
-# Agent 调用 RAG 工具
+```bash
+# 1. 通过 REST API 创建知识库
+POST /api/v1/knowledge-bases
+{
+  "name": "工作文档",
+  "description": "我的工作资料"
+}
+
+# 2. 通过 REST API 上传文档
+POST /api/v1/documents/upload
+FormData: {knowledge_base_id, file}
+
+# 3. Agent 调用 MCP 工具进行搜索
+# (自动注入 user_id 和 knowledge_base_id)
 tool_call: search_knowledge_base(
+    user_id="user123",
+    knowledge_base_id="kb456",
     query="人工智能应用",
     top_k=5
 )
-
-# 返回带引用的答案
-response: "根据你的文档[1][2]，人工智能的主要应用包括..."
 ```
+
+### 文档管理 REST API
+
+文档管理的 REST API 端点由 Universal Agent Backend 提供：
+
+**知识库管理：**
+- `POST /api/v1/knowledge-bases` - 创建知识库
+- `GET /api/v1/knowledge-bases` - 列出用户的知识库
+- `GET /api/v1/knowledge-bases/{id}` - 获取知识库详情
+- `DELETE /api/v1/knowledge-bases/{id}` - 删除知识库
+
+**文档管理：**
+- `POST /api/v1/documents/upload` - 上传文档
+- `GET /api/v1/documents` - 列出文档
+- `GET /api/v1/documents/{id}/status` - 查询处理状态
+- `DELETE /api/v1/documents/{id}` - 删除文档
 
 ## 技术栈
 
-- **MCP 框架**: fastmcp
-- **向量数据库**: PostgreSQL + pgvector
-- **Embedding**: 智谱AI embedding-3
-- **文档处理**: LangChain + Unstructured
-- **异步框架**: asyncio + SQLAlchemy 2.0
+- **MCP 框架**: FastMCP
+- **向量数据库**: Pinecone 或 Weaviate
+- **Embedding**: 智谱AI embedding-3 (1024 维)
+- **异步框架**: asyncio
 
 ## 项目结构
 
@@ -108,11 +131,13 @@ response: "根据你的文档[1][2]，人工智能的主要应用包括..."
 RAG-MCP-Server/
 ├── src/
 │   ├── main.py              # MCP 服务器入口
-│   ├── tools/               # MCP 工具实现
-│   ├── services/            # 业务逻辑层
-│   ├── models/              # 数据模型
-│   └── core/                # 核心配置
-├── migrations/              # 数据库迁移
+│   ├── tools/
+│   │   └── rag_tools.py     # 搜索工具实现
+│   ├── services/
+│   │   ├── vector_store.py  # 向量数据库客户端
+│   │   └── search.py        # 语义搜索服务
+│   ├── config.py            # 配置管理
+│   └── embedding.py         # Embedding 服务
 ├── tests/                   # 测试
 ├── pyproject.toml
 ├── .env.example
@@ -122,19 +147,20 @@ RAG-MCP-Server/
 ## 环境变量
 
 ```bash
-# 数据库
-DATABASE_URL="postgresql+asyncpg://postgres:postgres@localhost:5432/rag_mcp"
+# 向量数据库 (Pinecone)
+PINECONE_API_KEY="your-pinecone-api-key"
+PINECONE_ENVIRONMENT="us-west1-gcp"
+PINECONE_INDEX_NAME="rag-knowledge-bases"
 
-# 智谱AI
+# 向量数据库 (Weaviate - 可选替代方案)
+# WEAVIATE_URL="https://your-cluster.weaviate.cloud"
+# WEAVIATE_API_KEY="your-weaviate-key"
+
+# 智谱AI Embedding
 ZHIPUAI_API_KEY="your_zhipuai_api_key"
 
-# 文档处理
-CHUNK_SIZE=1000
-CHUNK_OVERLAP=200
-MAX_FILE_SIZE=52428800  # 50MB
-
-# 对象存储
-STORAGE_BACKEND="local"  # local | minio | s3
+# 向量维度
+EMBEDDING_DIMENSION=1024
 ```
 
 ## 开发
@@ -153,13 +179,17 @@ uv run mypy .
 
 ## 部署
 
-```bash
-# Docker 部署
-docker-compose up -d
+RAG-MCP-Server 可以通过 MCP stdio 协议与 Universal Agent Backend 通信：
 
-# 查看日志
-docker-compose logs -f rag-mcp
+```bash
+# 在 Universal Agent Backend 中配置 MCP 服务器
+# 服务会自动启动并保持连接
 ```
+
+**部署建议：**
+- 向量数据库：使用 Pinecone 云服务或自建 Weaviate 集群
+- Embedding 服务：确保智谱AI API 可用
+- 网络配置：确保 Universal Agent Backend 可以访问 RAG-MCP-Server 的 stdio 进程
 
 ## 相关项目
 
